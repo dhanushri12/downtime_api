@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import text  
+from sqlalchemy import text
 
 from config import settings
 from constants import (
@@ -31,8 +31,7 @@ from email_service import email_service
 from file_handler import file_handler
 from models import (
     LoginModel, ForgotPassword, VerifyOTP, ResetPassword,
-    UserType, 
-    DGRRegister,
+    UserType, SiteMaster, DGRRegister,
     DashboardResponse, DashboardSummary, TurbinesPage,
     TurbineItem, ActiveAlarmItem,
     TurbineOverviewFinalResponse, TurbineOverviewMainData,
@@ -101,6 +100,18 @@ async def global_exception_handler(request: Request, exc: Exception):
         }
     )
 
+# ═══════════════════════════════════════════════
+# STARTUP & SHUTDOWN
+# ═══════════════════════════════════════════════
+
+@app.on_event("startup")
+async def startup_event():
+    test_db_connection()
+    init_db()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    pass
 
 # ═══════════════════════════════════════════════
 # TEMPORARY STORAGE FOR OTPs
@@ -153,7 +164,6 @@ async def login(login_data: LoginModel, db: Session = Depends(get_db)):
         }
     raise HTTPException(status_code=401, detail=ERROR_INVALID_CREDENTIALS)
 
-
 @app.post("/auth/get-otp", tags=["Authentication"])
 async def get_otp(forgot_data: ForgotPassword, db: Session = Depends(get_db)):
     """Send OTP to user's email for password reset"""
@@ -185,6 +195,46 @@ async def verify_otp(verify_data: VerifyOTP, db: Session = Depends(get_db)):
         }
     raise HTTPException(status_code=400, detail=ERROR_INVALID_OTP)
 
+@app.post("/auth/set-password", tags=["Authentication"])
+async def set_password(reset_data: ResetPassword, db: Session = Depends(get_db)):
+    """Set new password after OTP verification"""
+    email = reset_data.email
+    new_password = reset_data.new_password
+    confirm_password = reset_data.confirm_password
+    
+    if new_password != confirm_password:
+        raise HTTPException(status_code=400, detail=ERROR_PASSWORD_MISMATCH)
+    
+    password_error = validate_password(new_password)
+    if password_error:
+        raise HTTPException(status_code=400, detail=password_error)
+    
+    stored_data = otp_storage.get(email)
+    if not stored_data or not stored_data.get("verified"):
+        raise HTTPException(status_code=400, detail="OTP not verified")
+    
+    otp_storage.pop(email, None)
+    return {
+        "success": True,
+        "message": SUCCESS_PASSWORD_RESET,
+        "data": {"email": email}
+    }
+
+@app.post("/auth/reset-password", tags=["Authentication"])
+async def reset_password(reset_data: ResetPassword, db: Session = Depends(get_db)):
+    """Reset password (combined OTP verification + password reset)"""
+    return await set_password(reset_data, db)
+
+@app.post("/auth/verify-password", tags=["Authentication"])
+async def verify_password(login_data: LoginModel, db: Session = Depends(get_db)):
+    """Verify user password"""
+    if login_data.identifier == "admin" and login_data.password == "admin123":
+        return {"success": True, "message": "Password verified successfully"}
+    raise HTTPException(status_code=401, detail=ERROR_INVALID_CREDENTIALS)
+
+# ═════════════════════════════════════════════════════════════════════
+# DGR REGISTER (USER REGISTRATION) ENDPOINT
+# ═════════════════════════════════════════════════════════════════════
 
 @app.post("/post_dgrRegister", tags=["Authentication"])
 def post_dgrRegister(
@@ -193,19 +243,13 @@ def post_dgrRegister(
 ):
     """
     Register a new user (DGR Register)
-    - Validates password match
-    - Validates user type exists
-    - For 'Site Person' user type, siteName is mandatory
-    - Inserts user into tbl_usermaster
     """
-    # Check if passwords match
     if request.password != request.confirmPassword:
         raise HTTPException(
             status_code=400,
             detail="Password and Confirm Password do not match"
         )
     
-    # Validate user type exists
     user_type = (
         db.query(UserType)
         .filter(UserType.id == request.userType)
@@ -217,7 +261,6 @@ def post_dgrRegister(
             detail="Invalid User Type"
         )
     
-    # For 'Site Person', siteName is mandatory
     if user_type.usertype == "Site Person":
         if not request.siteName:
             raise HTTPException(
@@ -225,10 +268,8 @@ def post_dgrRegister(
                 detail="Site Name is mandatory for Site Person"
             )
     else:
-        # For other user types, set siteName to None
         request.siteName = None
     
-    # Insert user into database
     query = text("""
         INSERT INTO tbl_usermaster
         (
@@ -280,43 +321,75 @@ def post_dgrRegister(
         "message": "User Registered Successfully"
     }
 
+# ═════════════════════════════════════════════════════════════════════
+# GET USERTYPE & GET SITENAME APIs
+# ═════════════════════════════════════════════════════════════════════
 
-@app.post("/auth/set-password", tags=["Authentication"])
-async def set_password(reset_data: ResetPassword, db: Session = Depends(get_db)):
-    """Set new password after OTP verification"""
-    email = reset_data.email
-    new_password = reset_data.new_password
-    confirm_password = reset_data.confirm_password
-    
-    if new_password != confirm_password:
-        raise HTTPException(status_code=400, detail=ERROR_PASSWORD_MISMATCH)
-    
-    password_error = validate_password(new_password)
-    if password_error:
-        raise HTTPException(status_code=400, detail=password_error)
-    
-    stored_data = otp_storage.get(email)
-    if not stored_data or not stored_data.get("verified"):
-        raise HTTPException(status_code=400, detail="OTP not verified")
-    
-    otp_storage.pop(email, None)
-    return {
-        "success": True,
-        "message": SUCCESS_PASSWORD_RESET,
-        "data": {"email": email}
-    }
+@app.get("/get_usertype", tags=["Users"])
+def get_usertype(db: Session = Depends(get_db)):
+    """
+    Get all user types from tbl_usertype
+    """
+    try:
+        user_types = db.query(UserType).all()
+        
+        if not user_types:
+            return {
+                "status": False,
+                "message": "No user types found",
+                "data": []
+            }
+        
+        result = []
+        for ut in user_types:
+            result.append({
+                "id": ut.id,
+                "usertype": ut.usertype
+            })
+        
+        return {
+            "status": True,
+            "message": "User types retrieved successfully",
+            "data": result
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving user types: {str(e)}"
+        )
 
-@app.post("/auth/reset-password", tags=["Authentication"])
-async def reset_password(reset_data: ResetPassword, db: Session = Depends(get_db)):
-    """Reset password (combined OTP verification + password reset)"""
-    return await set_password(reset_data, db)
-
-@app.post("/auth/verify-password", tags=["Authentication"])
-async def verify_password(login_data: LoginModel, db: Session = Depends(get_db)):
-    """Verify user password"""
-    if login_data.identifier == "admin" and login_data.password == "admin123":
-        return {"success": True, "message": "Password verified successfully"}
-    raise HTTPException(status_code=401, detail=ERROR_INVALID_CREDENTIALS)
+@app.get("/get_sitename", tags=["Users"])
+def get_sitename(db: Session = Depends(get_db)):
+    """
+    Get all site names from tbl_sitemaster
+    """
+    try:
+        sites = db.query(SiteMaster).all()
+        
+        if not sites:
+            return {
+                "status": False,
+                "message": "No sites found",
+                "data": []
+            }
+        
+        result = []
+        for site in sites:
+            result.append({
+                "id": site.id,
+                "sitename": site.sitename
+            })
+        
+        return {
+            "status": True,
+            "message": "Site names retrieved successfully",
+            "data": result
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving site names: {str(e)}"
+        )
 
 # ═════════════════════════════════════════════════════════════════════
 # USERS ENDPOINTS
@@ -350,20 +423,34 @@ async def update_profile(
     db: Session = Depends(get_db)
 ):
     """Update user profile"""
-    photo_path = None
-    if photo:
-        photo_path = await file_handler.save_photo(photo)
-    return {
-        "success": True,
-        "message": SUCCESS_PROFILE_UPDATED,
-        "data": {
-            "fullname": fullname,
-            "emailid": emailid,
-            "contactno": contactno,
-            "theme": theme,
-            "photo": photo_path
+    try:
+        photo_path = None
+        
+        if photo:
+            is_valid, message = file_handler.validate_file(photo)
+            if not is_valid:
+                raise HTTPException(status_code=400, detail=message)
+            photo_path = await file_handler.save_photo(photo)
+            photo_path = f"/uploads/profile_photos/{photo_path.split('/')[-1]}"
+        
+        return {
+            "success": True,
+            "message": SUCCESS_PROFILE_UPDATED,
+            "data": {
+                "fullname": fullname or "Admin User",
+                "emailid": emailid or "admin@example.com",
+                "contactno": contactno or "+1234567890",
+                "theme": theme or "light",
+                "photo": photo_path or "/uploads/profile_photos/default.jpg"
+            }
         }
-    }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error updating profile: {str(e)}"
+        )
 
 @app.get("/users/ip-history", tags=["Users"])
 async def get_ip_history(db: Session = Depends(get_db)):
