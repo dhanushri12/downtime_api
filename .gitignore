@@ -1,0 +1,112 @@
+# ═══════════════════════════════════════════════
+# GIT IGNORE - PROTECT SENSITIVE FILES
+# ═══════════════════════════════════════════════
+
+# ─────────────────────────────────────────────────
+# ENVIRONMENT VARIABLES (SECRETS)
+# ─────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+.env.secret
+*.env
+
+# ─────────────────────────────────────────────────
+# PYTHON VIRTUAL ENVIRONMENTS
+# ─────────────────────────────────────────────────
+venv/
+ENV/
+env/
+.venv/
+python-env/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ─────────────────────────────────────────────────
+# PYTHON CACHE & BYTECODE
+# ─────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ─────────────────────────────────────────────────
+# IDE & EDITOR FILES
+# ─────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+.project
+.pydevproject
+.settings/
+*.iml
+
+# ─────────────────────────────────────────────────
+# DATABASE FILES
+# ─────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+database.db
+
+# ─────────────────────────────────────────────────
+# LOGS
+# ─────────────────────────────────────────────────
+*.log
+logs/
+*.log.*
+
+# ─────────────────────────────────────────────────
+# UPLOADED FILES & TEMPORARY FILES
+# ─────────────────────────────────────────────────
+uploads/
+temp/
+tmp/
+*.tmp
+.cache/
+
+# ─────────────────────────────────────────────────
+# SYSTEM FILES
+# ─────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.bak
+*.backup
+*~
+
+# ─────────────────────────────────────────────────
+# TESTING & COVERAGE
+# ─────────────────────────────────────────────────
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.hypothesis/
+.pytest_cache/
+
+# ─────────────────────────────────────────────────
+# DOCKER & CONTAINER FILES
+# ─────────────────────────────────────────────────
+.docker/
+docker-compose.override.yml
+
+# ─────────────────────────────────────────────────
+# OS SPECIFIC
+# ─────────────────────────────────────────────────
+.env.production
+.env.staging
+.env.development
